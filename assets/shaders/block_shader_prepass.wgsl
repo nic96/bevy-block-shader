@@ -14,6 +14,9 @@ struct MyVertexOutput {
     @location(0) world_position: vec4<f32>,
     @location(2) world_normal: vec3<f32>,
     @location(3) texture_layer: u32,
+#ifdef DEPTH_CLAMP_ORTHO
+    @location(4) clip_position_unclamped: vec4<f32>,
+#endif // DEPTH_CLAMP_ORTHO
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX
     @location(7) instance_index: u32,
 #endif
@@ -46,12 +49,18 @@ fn vertex(vertex: Vertex) -> MyVertexOutput {
 
     out.world_normal = mesh_functions::mesh_normal_local_to_world(normal, vertex.instance_index);
 
-    // Use vertex_no_morph.instance_index instead of vertex.instance_index to work around a wgpu dx12 bug.
-    // See https://github.com/gfx-rs/naga/issues/2416
-    var model = mesh_functions::get_model_matrix(vertex.instance_index);
+    let world_position = mesh_functions::get_model_matrix(vertex.instance_index) * local_position;
+    out.position = mesh_functions::mesh_position_local_to_clip(
+        mesh_functions::get_model_matrix(vertex.instance_index),
+        local_position,
+    );
 
-    let world_position = model * local_position;
-    out.position = mesh_functions::mesh_position_local_to_clip(model, local_position);
+    out.world_position = world_position;
+
+#ifdef DEPTH_CLAMP_ORTHO
+    out.clip_position_unclamped = out.position;
+    out.position.z = min(out.position.z, 1.0);
+#endif // DEPTH_CLAMP_ORTHO
 
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX
     out.instance_index = vertex.instance_index;
@@ -69,7 +78,7 @@ fn fragment(in: MyVertexOutput) -> FragmentOutput {
 #endif
 
 #ifdef DEPTH_CLAMP_ORTHO
-    out.frag_depth = in.position.z;
+    out.frag_depth = in.clip_position_unclamped.z;
 #endif // DEPTH_CLAMP_ORTHO
 
 #ifdef DEFERRED_PREPASS
